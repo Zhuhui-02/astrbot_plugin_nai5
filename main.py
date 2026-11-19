@@ -16,7 +16,7 @@ from .prompt_agent import PromptAgent
 from .prompting import PromptError, direct_draw_request, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.6.0")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.6.1")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -103,12 +103,10 @@ class NovelAIPlugin(Star):
                 if mode == "preview":
                     plan = await self.prompt_agent.compile(event.unified_msg_origin, description)
                     self.remember(self.previews, key, (monotonic() + 600, plan))
-                    return event.plain_result(self.prompt_text(plan) + "\n\n10 分钟内发送 /nai确认，使用这份提示词绘图。")
+                    return event.plain_result(self.prompt_text(plan) + "\n\n10 分钟内可多次发送 /nai确认，每次用这份提示词和随机种子生成一张图。")
                 endpoint, token = generation_service(self.config)
                 body = await self.make_body(event, mode, key, description)
                 png = await asyncio.to_thread(generate, token, body, endpoint)
-                if mode == "confirm":
-                    self.previews.pop(key, None)
                 if body["action"] == "generate":
                     if mode == "redraw":
                         _, source = self.last_text_draw[key]
@@ -205,7 +203,7 @@ class NovelAIPlugin(Star):
         yield event.plain_result(
             "也可以在对话中说「帮我画一张雨后的街道」，可开启「明确绘图请求优先处理」。\n"
             "/nai 雨后的街道 — 用描述绘图\n"
-            "/nai预览 描述 → /nai确认 — 看词后出图\n"
+            "/nai预览 描述 → /nai确认 — 10 分钟内可反复确认出图\n"
             "/nai画风 — 列出可用预设；/nai预览 【画风：预设名称】雨后街道\n"
             "/nai图生图 水彩风格的街道 — 随指令附一张图，或回复原图\n"
             "/nai原词 watercolor, rainy street — 直接提交已有提示词\n"
