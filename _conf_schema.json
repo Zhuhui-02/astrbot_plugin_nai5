@@ -1,4 +1,10 @@
 {
+  "direct_draw": {
+    "description": "明确绘图请求优先处理",
+    "type": "bool",
+    "default": false,
+    "hint": "当前会话启用绘图工具时，以「帮我画」「请画一张」或「用预设名画」开头的文字请求直接进入编词流程，跳过人格判断。"
+  },
   "provider": {
     "type": "string",
     "description": "生图服务商",

@@ -10,6 +10,23 @@ class PromptError(ValueError):
     pass
 
 
+def direct_draw_request(text, presets):
+    """Match an explicit drawing request at the start of a chat message."""
+    text = text.strip()
+    draw = r"(?:帮我画|给我画|为我画|画一张|画一幅)"
+    prefix = re.match(r"(?:请\s*)?" + draw + r"(?:一张|一幅)?\s*[：:]?\s*", text)
+    scene = text[prefix.end():] if prefix else text
+    for name in sorted(presets, key=len, reverse=True):
+        style = r"(?:请)?(?:用|按|按照)(?:我的)?[「“]?" + re.escape(name) + r"[」”]?(?:的)?(?:预设|画风|风格)?"
+        if prefix:
+            match = re.match(style + r"(?:来画|来一张|画一张|画一幅|画|的)?[，,：:\s]*", scene)
+        else:
+            match = re.match(style + r"(?:帮我画|给我画|来画|画|来一张)(?:一张|一幅)?[，,：:\s]*", scene)
+        if match and scene[match.end():].strip():
+            return scene[match.end():].strip(), name
+    return (scene, "") if prefix and scene else None
+
+
 def style_presets(config):
     presets = {}
     for entry in config.get("style_presets", []):

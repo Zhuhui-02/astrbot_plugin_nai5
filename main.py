@@ -13,10 +13,10 @@ from astrbot.api.star import Context, Star, register
 
 from .novelai import GenerationError, MODELS, SIZES, generation_service, generate, payload
 from .source_image import read_source
-from .prompting import PromptError, instructions, parse_prompt, select_style, style_presets
+from .prompting import PromptError, direct_draw_request, instructions, parse_prompt, select_style, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.0")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.1")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -144,6 +144,16 @@ class NovelAIPlugin(Star):
             names = list(style_presets(self.config))
         except PromptError:
             return
+        if self.config.get("direct_draw", False) and not getattr(req, "image_urls", None):
+            direct = direct_draw_request(event.message_str, names)
+            if direct:
+                event.stop_event()
+                if not event.get_extra("nai5_draw_handled"):
+                    event.set_extra("nai5_draw_handled", True)
+                    scene, preset = direct
+                    result = await self.handle(event, "draw", description=scene, preset_name=preset)
+                    await event.send(result)
+                return
         if names:
             req.system_prompt = (req.system_prompt or "") + (
                 "\n当前配置的 NovelAI 画风预设名称：" + json.dumps(names, ensure_ascii=False)
