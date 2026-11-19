@@ -1,11 +1,10 @@
 import asyncio
-import json
 import secrets
 from copy import deepcopy
 from collections import OrderedDict
 from time import monotonic
 
-from astrbot.api import AstrBotConfig, logger
+from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 from astrbot.api.provider import ProviderRequest
@@ -13,70 +12,19 @@ from astrbot.api.star import Context, Star, register
 
 from .novelai import GenerationError, MODELS, SIZES, generation_service, generate, payload
 from .source_image import read_source
-from .prompting import (OUTPUT_FORMAT, PromptError, PromptFormatError, direct_draw_request,
-                        instructions, parse_prompt, select_style, style_presets)
+from .prompt_agent import PromptAgent
+from .prompting import PromptError, direct_draw_request, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.3")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.6.0")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+        self.prompt_agent = PromptAgent(context, config)
         self.previews = OrderedDict()
         self.last_text_draw = OrderedDict()
         self.lock = asyncio.Lock()
-
-    async def request_prompt_text(self, provider, system, prompt):
-        answer = await asyncio.wait_for(self.context.llm_generate(
-            chat_provider_id=provider, system_prompt=system, prompt=prompt
-        ), timeout=120)
-        return answer.completion_text
-
-    async def compile_prompt(self, event, description, preset_name="", *, from_chat=False):
-        context_hint = ""
-        if from_chat:
-            original = (event.message_str or "").strip()
-            if original:
-                if original != description:
-                    context_hint = description
-                description = original
-                direct = direct_draw_request(original, style_presets(self.config))
-                if direct and direct[1]:
-                    preset_name = direct[1]
-        scene, name, brief = select_style(self.config, description, preset_name)
-        system = instructions(scene, use_style=bool(name))
-        fields = {"scene": scene}
-        if context_hint:
-            fields["context_hint"] = context_hint
-        if name:
-            fields.update(style_name=name, style_brief=brief)
-        prompt = json.dumps(fields, ensure_ascii=False) if len(fields) > 1 else scene
-        try:
-            provider = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
-            raw = await self.request_prompt_text(provider, system, prompt)
-            try:
-                plan = parse_prompt(raw)
-            except PromptFormatError as exc:
-                logger.info("NAI5 编词结果需要整理格式：%s", exc)
-                repair = (
-                    OUTPUT_FORMAT + " 将输入中的 draft 整理为上述结构，保留已有主串、全部角色、"
-                    "左右关系、文字和负面词。只依据草稿整理；如果草稿没有可整理的绘图提示词，返回 null。"
-                )
-                draft = json.dumps({"draft": raw, "error": str(exc)}, ensure_ascii=False)
-                fixed = await self.request_prompt_text(provider, repair, draft)
-                if isinstance(fixed, str) and fixed.strip() == "null":
-                    raise PromptError("编词模型未给出可用的绘图提示词。请用 /nai预览 检查当前聊天模型。")
-                try:
-                    plan = parse_prompt(fixed)
-                except PromptError as final:
-                    raise PromptError(f"编词模型已尝试整理一次，仍无法读取：{final}") from None
-        except PromptError:
-            raise
-        except Exception as exc:
-            logger.warning("NAI5 聊天模型调用失败 (%s)", type(exc).__name__)
-            raise PromptError("无法取得提示词，请检查当前会话的聊天模型配置及连接。") from exc
-        plan["style_name"] = name
-        return plan
 
     @staticmethod
     def remember(cache, key, value):
@@ -112,7 +60,7 @@ class NovelAIPlugin(Star):
         body["parameters"]["seed"] = seed
         return body
 
-    async def make_body(self, event, mode, key, description, preset_name=""):
+    async def make_body(self, event, mode, key, description):
         if mode == "redraw":
             return self.redraw_body(key, description)
         model = self.config.get("model", MODELS[0])
@@ -131,7 +79,7 @@ class NovelAIPlugin(Star):
         elif mode == "raw":
             plan = {"base": description, "negative": "", "characters": []}
         else:
-            plan = await self.compile_prompt(event, description, preset_name, from_chat=mode == "natural")
+            plan = await self.prompt_agent.compile(event.unified_msg_origin, description)
         return payload(plan, model, size, config=self.config, source=source)
 
     def image_result(self, event, png, seed):
@@ -141,11 +89,11 @@ class NovelAIPlugin(Star):
             return event.chain_result([Nodes([node])])
         return event.chain_result(content)
 
-    async def handle(self, event, mode, description=None, preset_name=""):
+    async def handle(self, event, mode, description=None):
         if description is None:
             parts = event.message_str.strip().split(maxsplit=1)
             description = parts[1] if len(parts) == 2 else ""
-        if mode not in ("confirm", "redraw") and not (description or (mode == "natural" and event.message_str.strip())):
+        if mode not in ("confirm", "redraw") and not description:
             return event.plain_result("请在指令后填写提示词或画面描述。输入 /nai帮助 查看示例。")
         if self.lock.locked():
             return event.plain_result("正在处理另一条绘图指令，请稍后再试。")
@@ -153,11 +101,11 @@ class NovelAIPlugin(Star):
         async with self.lock:
             try:
                 if mode == "preview":
-                    plan = await self.compile_prompt(event, description)
+                    plan = await self.prompt_agent.compile(event.unified_msg_origin, description)
                     self.remember(self.previews, key, (monotonic() + 600, plan))
                     return event.plain_result(self.prompt_text(plan) + "\n\n10 分钟内发送 /nai确认，使用这份提示词绘图。")
                 endpoint, token = generation_service(self.config)
-                body = await self.make_body(event, mode, key, description, preset_name)
+                body = await self.make_body(event, mode, key, description)
                 png = await asyncio.to_thread(generate, token, body, endpoint)
                 if mode == "confirm":
                     self.previews.pop(key, None)
@@ -177,43 +125,31 @@ class NovelAIPlugin(Star):
                 return event.plain_result(str(exc))
 
     @filter.on_llm_request()
-    async def provide_style_names(self, event: AstrMessageEvent, req: ProviderRequest):
-        tools = getattr(req.func_tool, "tools", ())
-        if not any(tool.name == "nai5_draw_image" for tool in tools):
+    async def dispatch_direct_draw(self, event: AstrMessageEvent, req: ProviderRequest):
+        if not self.config.get("direct_draw", True) or getattr(req, "image_urls", None):
             return
         try:
-            names = list(style_presets(self.config))
+            direct = direct_draw_request(event.message_str, style_presets(self.config))
         except PromptError:
-            return
-        if self.config.get("direct_draw", False) and not getattr(req, "image_urls", None):
-            direct = direct_draw_request(event.message_str, names)
-            if direct:
-                event.stop_event()
-                if not event.get_extra("nai5_draw_handled"):
-                    event.set_extra("nai5_draw_handled", True)
-                    scene, preset = direct
-                    result = await self.handle(event, "draw", description=scene, preset_name=preset)
-                    await event.send(result)
-                return
-        if names:
-            req.system_prompt = (req.system_prompt or "") + (
-                "\n当前配置的 NovelAI 画风预设名称：" + json.dumps(names, ensure_ascii=False)
-                + "。当用户要求用某一预设绘图时，将对应的完整名称传给 nai5_draw_image 的 preset_name。"
-                "例如「按某某风格来一张」也可以点名预设。多个名称都可能匹配时先询问。"
-            )
+            direct = direct_draw_request(event.message_str, ())
+        if direct:
+            event.stop_event()
+            if not event.get_extra("nai5_draw_handled"):
+                event.set_extra("nai5_draw_handled", True)
+                await event.send(await self.handle(event, "draw", description=event.message_str.strip()))
 
     @filter.llm_tool(name="nai5_draw_image")
     async def natural_draw(self, event: AstrMessageEvent, description: str, preset_name: str = ""):
         """当前用户明确请你画图时，使用 NovelAI 生成并发送一张插画。每条消息只调用一次。
 
         Args:
-            description(string): 完整画面描述，保留角色、动作、构图、文字和用户临时描述的视觉风格。
-            preset_name(string): 用户点名的预设名称。未指定时填空字符串；明确要求跳过预设时填「无」。
+            description(string): 兼容字段，插件从当前用户消息直接读取画面描述。
+            preset_name(string): 兼容字段，请留空，插件从原文识别预设。
         """
         if event.get_extra("nai5_draw_handled"):
             return "这条消息的绘图请求已经处理。"
         event.set_extra("nai5_draw_handled", True)
-        result = await self.handle(event, "natural", description=description.strip(), preset_name=preset_name)
+        result = await self.handle(event, "draw", description=(event.message_str or "").strip())
         await event.send(result)
         return "处理结果已发送到当前聊天。"
 
@@ -267,7 +203,7 @@ class NovelAIPlugin(Star):
     async def help_command(self, event: AstrMessageEvent):
         """查看 NovelAI 绘图指令。"""
         yield event.plain_result(
-            "也可以在对话中说「帮我画一张雨后的街道」，需要启用绘图工具。\n"
+            "也可以在对话中说「帮我画一张雨后的街道」，可开启「明确绘图请求优先处理」。\n"
             "/nai 雨后的街道 — 用描述绘图\n"
             "/nai预览 描述 → /nai确认 — 看词后出图\n"
             "/nai画风 — 列出可用预设；/nai预览 【画风：预设名称】雨后街道\n"

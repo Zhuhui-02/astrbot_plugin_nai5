@@ -40,17 +40,29 @@ def style_presets(config):
     return presets
 
 
-def select_style(config, description, preset_name=""):
-    name = preset_name.strip() or config.get("default_style", "").strip()
-    override = re.match(r"^【画风[:：]([^】]+)】\s*", description)
+def select_style(config, description):
+    presets = style_presets(config)
+    scene, requested = direct_draw_request(description, presets) or (description, "")
+    name = requested or config.get("default_style", "").strip()
+    override = re.match(r"^【画风[:：]([^】]+)】\s*", scene)
     if override:
         name = override[1].strip()
-        description = description[override.end():]
+        description = scene[override.end():]
+    elif not requested:
+        named = [
+            preset for preset in presets if re.search(
+                r"(?:^|[，,。；;、\s])(?:请)?(?:使用|用|按照|按)(?:我的)?[「“]?"
+                + re.escape(preset) + r"[」”]?(?:的)?(?:画风|风格|预设)", description
+            )
+        ]
+        if len(named) > 1:
+            raise PromptError("本条要求中有多个画风，请用【画风：名称】指定一个。")
+        if named:
+            name = named[0]
     if not description.strip():
         raise PromptError("请在画风名称后填写要画的内容。")
     if not name or name == "无":
         return description, "", ""
-    presets = style_presets(config)
     if name not in presets:
         raise PromptError(f"找不到画风「{name}」，请用 /nai画风 查看可用名称。")
     return description, name, presets[name]
@@ -78,6 +90,7 @@ OUTPUT_FORMAT = (
 
 def instructions(description, *, use_style=False):
     excerpts = [
+        (SKILLS / "nai5-writing" / "SKILL.md").read_text(encoding="utf-8"),
         section("nai5-illustration-composition", "composition.md", "## 镜头、空间与主次"),
         section("nai5-writing", "conventions.md", "## 用户事实、原串与本次可见范围"),
         section("nai5-writing", "conventions.md", "## 字段职责：先选画面类型"),
@@ -100,7 +113,7 @@ def instructions(description, *, use_style=False):
         )
     return "\n\n".join([OUTPUT_FORMAT, *excerpts]) + """
 根据以上方法把用户的画面描述编译成一张 NovelAI V5 插画。只返回一个 JSON 对象。
-输入为 JSON 时，scene 是当前用户的要求。仅当用户引用前文（如“沿用刚才的角色”）时，用 context_hint 补足所指对象；发生冲突以 scene 为准。
+输入为 JSON 时，scene 是当前用户的要求。按本条原文编词；资料中的人物、物件、构图示例仅用于说明写法。
 提交前逐项对照用户指定的人数、外观、左右位置、谁对谁做什么、道具归属和画中文字。让主串、每位角色的描述和坐标彼此一致。
 提示词用英文，画面内指定原文逐字保留。只交付上述 API 格式的有效 JSON。
 """
