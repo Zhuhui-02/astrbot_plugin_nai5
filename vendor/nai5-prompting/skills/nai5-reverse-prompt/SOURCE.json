@@ -1,0 +1,18 @@
+{
+  "version": "v1.2.9",
+  "role": "writing",
+  "skill": "nai5-reverse-prompt",
+  "requires": [
+    "nai5-writing"
+  ],
+  "modules": {
+    "writing-reverse": {
+      "path": "方法/写法/reverse.md",
+      "sha256": "447a9dcdfd19b6c1bd2ff6f457a578b7e61791e83cfc3a0cca9b03efc1d19723"
+    }
+  },
+  "entry": {
+    "path": "工具/职责拆分/入口/nai5-reverse-prompt.md",
+    "sha256": "bc8a7e4c84cdd559ee33dfd166e2bbc475ef4a0a3411c8008ed88959f21f8cb6"
+  }
+}

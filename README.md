@@ -1,0 +1,36 @@
+# AstrBot · NovelAI V5 绘图
+
+在聊天中用中文描述画面，由当前会话的聊天模型读取随插件分发的 nai5-prompting 资料，编写主提示词、角色描述、角色中心坐标和按需使用的负面提示词。插件将这些字段提交至 NovelAI，解包 PNG 并作为图片消息发送。
+
+## 安装与配置
+
+1. 在 AstrBot WebUI 的插件管理页选择「从 URL 安装」，填入 `https://github.com/Zhuhui-02/astrbot_plugin_nai5`，也可上传插件 ZIP。也可以将包内的 `astrbot_plugin_nai5` 文件夹放到 AstrBot 的 `data/plugins/` 下，然后重启 AstrBot。图生图依赖 Pillow，已在 requirements.txt 声明。
+2. 在 AstrBot 中为当前会话配置可用的聊天模型。插件使用 4.5.7 引入的聊天模型接口。
+3. 在 NovelAI 账户设置中获取 Persistent API Token，在插件配置的同名字段填写并保存。也可为 AstrBot 进程设置 `NOVELAI_API_TOKEN` 后重启，插件优先读取环境变量。
+4. 选择 V5 Full 或 V5 Curated，以及方形、横图或竖图。默认使用 V5 Full、1024 × 1024、28 步，每次生成一张。支持配置采样步数、提示词引导强度、图生图变化强度和噪声。绘图使用 Token 对应账户的额度。
+
+## 在聊天中使用
+
+**直接说出绘图需求。** 在已唤醒机器人的聊天中说「帮我画一张雨后街角的水彩画」。当前聊天模型须支持工具调用，当前会话的人格须允许使用 `nai5_draw_image`。模型选中工具后，插件会调用内置技能编写提示词并出图。群聊按现有唤醒设置 @机器人即可。也可以用 `/nai 描述` 明确触发绘图。
+
+**QQ 聊天记录卡片。** 使用 OneBot v11（aiocqhttp）接入 QQ 时，群聊和私聊默认把成图和种子装入一条合并转发消息，点开「聊天记录」即可看图。此设置适用于全部出图入口。在插件配置中关闭「QQ 用聊天记录卡片发送成图」即可切换至普通图片。其他适配器使用普通图片。卡片需要 OneBot 实现支持所在聊天类型的合并转发。实现参考 [ppnai 的绘图回复](https://github.com/dafeiwu666/astrbot_plugin_ppnai/blob/main/src/handlers_nai.py)。
+
+| 指令 | 效果 |
+| --- | --- |
+| `/nai 雨后的东京小巷，穿黄色雨衣的女孩从蓝色自动售货机旁走过` | 直接编写提示词并出图 |
+| `/nai预览 横向构图，左侧银发女孩把红伞递给右侧黑发少年` | 调用聊天模型，显示主提示词、角色栏和位置 |
+| `/nai确认` | 在同一会话使用本人最近的预览请求一张图；无需再调用聊天模型 |
+| `/nai图生图 将街景改成雨夜水彩画` | 随指令附一张原图，或回复平台能解析出图片的消息。插件将原图居中裁切到配置画幅后交给 NovelAI，聊天模型只读取文字描述 |
+| `/nai原词 watercolor, rainy street` | 将已有主提示词直接提交给 NovelAI，无需聊天模型 |
+| `/nai重画` 或 `/nai重画 42` | 复用本人在当前会话最近一次成功文生图的提示词和参数，随机或指定种子。每次出图会回传本次种子 |
+| `/nai帮助` | 查看指令示例 |
+
+预览有效期为 10 分钟，成功取图后消费一次。插件重载会清除预览和重画记录。账户按实际生成结算，遇到超时可先核对用量。提示词里的构图用语指导画面内容，输出像素尺寸由插件画幅配置决定。多人共享机器人的场合，可在 AstrBot 的命令权限管理中设置使用范围。
+
+本版的图生图、重画和参数设置参考了 [xxuanzQAQ 的 AstrBot NovelAI 插件](https://github.com/xxuanzQAQ/astrbot_plugin_novelai)。
+
+## 随包技能及来源
+
+内置 Miint-Sunny 的 v1.2.9 完整拆分包，共 11 个技能。原文、参考文件、许可与署名位于 `vendor/nai5-prompting/`。绘图入口默认读取构图、字段职责、质量词、角色栏和主串顺序；遇到漫画、四格、服装等关键词时追加对应写法。插件直接读取本地章节并传给聊天模型，安装后即可使用。技能原文保留上游的 GPL-3.0-only 许可与第三方材料声明，插件代码采用 GPL-3.0-only。固定来源见 [上游版本快照](https://github.com/Miint-Sunny/nai5-prompting/tree/a5f3df8eaafe0f4563f64d6165e34c9aa112abb7)。
+
+AstrBot 的会话模型查找和生成接口见 [AstrBot 插件 AI 指南](https://docs.astrbot.app/dev/star/guides/ai.html)。生图使用 Bearer Token 和官方图像域名上的 POST /ai/generate-image，并请求 ZIP 响应。接口与模型说明见 [NovelAI 图像 API](https://image.novelai.net/docs/doc.json) 和 [官方模型文档](https://docs.novelai.net/en/image/models/)。V5 参数及角色字段同时参考了 [NAIWeaver 的请求构造代码](https://github.com/ststoryweaver/NAIWeaver/blob/master/lib/core/services/nai_request_builder.dart)。

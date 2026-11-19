@@ -1,0 +1,61 @@
+{
+  "qq_forward_card": {
+    "description": "QQ 用聊天记录卡片发送成图",
+    "type": "bool",
+    "default": true,
+    "hint": "适用于 OneBot v11 的群聊和私聊。关闭后直接发送图片和种子。"
+  },
+  "api_token": {
+    "description": "NovelAI Persistent API Token",
+    "type": "string",
+    "default": "",
+    "hint": "也可通过 AstrBot 进程环境变量 NOVELAI_API_TOKEN 提供，环境变量优先。"
+  },
+  "model": {
+    "description": "NovelAI 图像模型",
+    "type": "string",
+    "options": [
+      "nai-diffusion-5-full",
+      "nai-diffusion-5-curated"
+    ],
+    "default": "nai-diffusion-5-full"
+  },
+  "size": {
+    "description": "生成画幅",
+    "type": "string",
+    "options": [
+      "方形",
+      "横图",
+      "竖图"
+    ],
+    "default": "方形"
+  },
+  "steps": {
+    "description": "采样步数",
+    "type": "int",
+    "default": 28,
+    "minimum": 1,
+    "maximum": 50
+  },
+  "scale": {
+    "description": "提示词引导强度",
+    "type": "float",
+    "default": 5.0,
+    "minimum": 1,
+    "maximum": 10
+  },
+  "strength": {
+    "description": "图生图变化强度",
+    "type": "float",
+    "default": 0.5,
+    "minimum": 0.1,
+    "maximum": 0.9
+  },
+  "noise": {
+    "description": "图生图噪声",
+    "type": "float",
+    "default": 0.2,
+    "minimum": 0,
+    "maximum": 1
+  }
+}
