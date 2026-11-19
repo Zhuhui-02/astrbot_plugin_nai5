@@ -44,7 +44,7 @@ def select_style(config, description, preset_name=""):
     name = preset_name.strip() or config.get("default_style", "").strip()
     override = re.match(r"^【画风[:：]([^】]+)】\s*", description)
     if override:
-        name = preset_name.strip() or override[1].strip()
+        name = override[1].strip()
         description = description[override.end():]
     if not description.strip():
         raise PromptError("请在画风名称后填写要画的内容。")
@@ -70,9 +70,11 @@ def section(skill, filename, heading):
 def instructions(description, *, use_style=False):
     excerpts = [
         section("nai5-illustration-composition", "composition.md", "## 镜头、空间与主次"),
+        section("nai5-writing", "conventions.md", "## 用户事实、原串与本次可见范围"),
         section("nai5-writing", "conventions.md", "## 字段职责：先选画面类型"),
         section("nai5-writing", "conventions.md", "## 完整导出的质量词与 UC"),
         section("nai5-writing", "illustration.md", "### 主提示词里的顺序"),
+        section("nai5-writing", "illustration.md", "### 空间关系与归属"),
         section("nai5-writing", "illustration.md", "### 角色栏放多少：按原创或版权角色区分"),
     ]
     if re.search(r"漫画|四格|分镜|comic|manga", description, re.I):
@@ -89,6 +91,8 @@ def instructions(description, *, use_style=False):
         )
     return "\n\n".join(excerpts) + """
 根据以上方法把用户的画面描述编译成一张 NovelAI V5 插画。只返回一个 JSON 对象。
+输入为 JSON 时，scene 是当前用户的要求。仅当用户引用前文（如“沿用刚才的角色”）时，用 context_hint 补足所指对象；发生冲突以 scene 为准。
+提交前逐项对照用户指定的人数、外观、左右位置、谁对谁做什么、道具归属和画中文字。让主串、每位角色的描述和坐标彼此一致。
 格式 {"base":"主提示词","negative":"","characters":[{"prompt":"角色栏","x":0.5,"y":0.5}]}。
 提示词用英文，画面内指定原文逐字保留。无角色栏时返回空数组。x、y 是角色中心的
 归一化坐标，从左上角 (0,0) 到右下角 (1,1)。不要输出示例占位符、字段标题或解释。
