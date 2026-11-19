@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 import secrets
 from copy import deepcopy
 from collections import OrderedDict
@@ -12,12 +11,12 @@ from astrbot.api.message_components import Image, Node, Nodes, Plain
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 
-from .novelai import GenerationError, MODELS, SIZES, generate, payload
+from .novelai import GenerationError, MODELS, SIZES, generation_service, generate, payload
 from .source_image import read_source
 from .prompting import PromptError, instructions, parse_prompt, select_style, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.4.1")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.0")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -115,9 +114,6 @@ class NovelAIPlugin(Star):
             description = parts[1] if len(parts) == 2 else ""
         if mode not in ("confirm", "redraw") and not description:
             return event.plain_result("请在指令后填写提示词或画面描述。输入 /nai帮助 查看示例。")
-        token = (os.getenv("NOVELAI_API_TOKEN") or self.config.get("api_token", "")).strip()
-        if mode != "preview" and not token:
-            return event.plain_result("请管理员先配置 NovelAI Persistent API Token。")
         if self.lock.locked():
             return event.plain_result("正在处理另一条绘图指令，请稍后再试。")
         key = (event.unified_msg_origin, event.get_sender_id())
@@ -127,8 +123,9 @@ class NovelAIPlugin(Star):
                     plan = await self.compile_prompt(event, description)
                     self.remember(self.previews, key, (monotonic() + 600, plan))
                     return event.plain_result(self.preview_text(plan))
+                endpoint, token = generation_service(self.config)
                 body = await self.make_body(event, mode, key, description, preset_name)
-                png = await asyncio.to_thread(generate, token, body)
+                png = await asyncio.to_thread(generate, token, body, endpoint)
                 if mode == "confirm":
                     self.previews.pop(key, None)
                 if body["action"] == "generate":

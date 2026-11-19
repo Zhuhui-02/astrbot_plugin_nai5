@@ -1,4 +1,39 @@
 {
+  "provider": {
+    "type": "string",
+    "description": "生图服务商",
+    "options": [
+      "NovelAI 官方",
+      "蛋糕",
+      "Langbai",
+      "自定义镜像"
+    ],
+    "default": "NovelAI 官方"
+  },
+  "dangao_api_key": {
+    "type": "string",
+    "description": "蛋糕 API Key",
+    "default": "",
+    "hint": "填写该站签发的密钥，也可设置 DANGAO_API_KEY 环境变量。"
+  },
+  "langbai_api_key": {
+    "type": "string",
+    "description": "Langbai API Key",
+    "default": "",
+    "hint": "填写该站签发的密钥，也可设置 LANGBAI_API_KEY 环境变量。"
+  },
+  "custom_api_key": {
+    "type": "string",
+    "description": "自定义镜像 API Key",
+    "default": "",
+    "hint": "填写该站签发的密钥，也可设置 NAI_MIRROR_API_KEY 环境变量。"
+  },
+  "custom_endpoint": {
+    "type": "string",
+    "description": "自定义镜像完整生图地址",
+    "default": "",
+    "hint": "仅用于自定义镜像，填写 NovelAI 原生协议的 HTTPS 完整接口地址，含 /ai/generate-image 或站点指定路径。"
+  },
   "style_presets": {
     "type": "list",
     "description": "画风预设",

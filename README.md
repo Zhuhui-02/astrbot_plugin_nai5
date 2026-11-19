@@ -6,7 +6,16 @@
 
 1. 在 AstrBot WebUI 的插件管理页选择「从 URL 安装」，填入 `https://github.com/Zhuhui-02/astrbot_plugin_nai5`，也可上传插件 ZIP。也可以将包内的 `astrbot_plugin_nai5` 文件夹放到 AstrBot 的 `data/plugins/` 下，然后重启 AstrBot。图生图依赖 Pillow，已在 requirements.txt 声明。
 2. 在 AstrBot 中为当前会话配置可用的聊天模型。插件使用 4.5.7 引入的聊天模型接口。
-3. 在 NovelAI 账户设置中获取 Persistent API Token，在插件配置的同名字段填写并保存。也可为 AstrBot 进程设置 `NOVELAI_API_TOKEN` 后重启，插件优先读取环境变量。
+3. 在插件配置中选择「生图服务商」，填写该站签发的密钥并保存。各站密钥独立，环境变量优先于对应配置字段。
+
+   | 生图服务商 | 填写的密钥 | 可选环境变量 |
+   | --- | --- | --- |
+   | NovelAI 官方（默认） | NovelAI Persistent API Token | `NOVELAI_API_TOKEN` |
+   | 蛋糕 | 在 dangao.iisbo.com 创建的 API Key | `DANGAO_API_KEY` |
+   | Langbai | 在 nai.langbai.cc 控制台创建的 API Key | `LANGBAI_API_KEY` |
+   | 自定义镜像 | 该站的 API Key，另填包含接口路径的完整 HTTPS 生图地址 | `NAI_MIRROR_API_KEY` |
+
+   两个预设镜像都请求站点根域上的 `POST /ai/generate-image`，沿用 NovelAI 原生请求体、Bearer 鉴权和 V5 角色字段。文生图、图生图及重画使用当前选中的站点，费用由该站结算。自定义地址需支持同一协议和所选模型；定价页、OpenAI 的 `/v1` 地址不能用作原生生图地址。参见 [蛋糕站点](https://dangao.iisbo.com/) 和 [Langbai 接口文档](https://nai.langbai.cc/docs)。
 4. 选择 V5 Full 或 V5 Curated，以及方形、横图或竖图。默认使用 V5 Full、1024 × 1024、28 步，每次生成一张。支持配置采样步数、提示词引导强度、图生图变化强度和噪声。绘图使用 Token 对应账户的额度。
 
 ## 在聊天中使用
