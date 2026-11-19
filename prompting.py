@@ -23,11 +23,11 @@ def style_presets(config):
     return presets
 
 
-def select_style(config, description):
-    name = config.get("default_style", "").strip()
+def select_style(config, description, preset_name=""):
+    name = preset_name.strip() or config.get("default_style", "").strip()
     override = re.match(r"^【画风[:：]([^】]+)】\s*", description)
     if override:
-        name = override[1].strip()
+        name = preset_name.strip() or override[1].strip()
         description = description[override.end():]
     if not description.strip():
         raise PromptError("请在画风名称后填写要画的内容。")

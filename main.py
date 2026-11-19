@@ -9,6 +9,7 @@ from time import monotonic
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image, Node, Nodes, Plain
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 
 from .novelai import GenerationError, MODELS, SIZES, generate, payload
@@ -16,7 +17,7 @@ from .source_image import read_source
 from .prompting import PromptError, instructions, parse_prompt, select_style, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.4.0")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.4.1")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -25,8 +26,8 @@ class NovelAIPlugin(Star):
         self.last_text_draw = OrderedDict()
         self.lock = asyncio.Lock()
 
-    async def compile_prompt(self, event, description):
-        scene, name, brief = select_style(self.config, description)
+    async def compile_prompt(self, event, description, preset_name=""):
+        scene, name, brief = select_style(self.config, description, preset_name)
         system = instructions(scene, use_style=bool(name))
         prompt = scene
         if name:
@@ -79,7 +80,7 @@ class NovelAIPlugin(Star):
         body["parameters"]["seed"] = seed
         return body
 
-    async def make_body(self, event, mode, key, description):
+    async def make_body(self, event, mode, key, description, preset_name=""):
         if mode == "redraw":
             return self.redraw_body(key, description)
         model = self.config.get("model", MODELS[0])
@@ -98,7 +99,7 @@ class NovelAIPlugin(Star):
         elif mode == "raw":
             plan = {"base": description, "negative": "", "characters": []}
         else:
-            plan = await self.compile_prompt(event, description)
+            plan = await self.compile_prompt(event, description, preset_name)
         return payload(plan, model, size, config=self.config, source=source)
 
     def image_result(self, event, png, seed):
@@ -108,7 +109,7 @@ class NovelAIPlugin(Star):
             return event.chain_result([Nodes([node])])
         return event.chain_result(content)
 
-    async def handle(self, event, mode, description=None):
+    async def handle(self, event, mode, description=None, preset_name=""):
         if description is None:
             parts = event.message_str.strip().split(maxsplit=1)
             description = parts[1] if len(parts) == 2 else ""
@@ -126,7 +127,7 @@ class NovelAIPlugin(Star):
                     plan = await self.compile_prompt(event, description)
                     self.remember(self.previews, key, (monotonic() + 600, plan))
                     return event.plain_result(self.preview_text(plan))
-                body = await self.make_body(event, mode, key, description)
+                body = await self.make_body(event, mode, key, description, preset_name)
                 png = await asyncio.to_thread(generate, token, body)
                 if mode == "confirm":
                     self.previews.pop(key, None)
@@ -137,17 +138,34 @@ class NovelAIPlugin(Star):
             except (GenerationError, PromptError) as exc:
                 return event.plain_result(str(exc))
 
+    @filter.on_llm_request()
+    async def provide_style_names(self, event: AstrMessageEvent, req: ProviderRequest):
+        tools = getattr(req.func_tool, "tools", ())
+        if not any(tool.name == "nai5_draw_image" for tool in tools):
+            return
+        try:
+            names = list(style_presets(self.config))
+        except PromptError:
+            return
+        if names:
+            req.system_prompt = (req.system_prompt or "") + (
+                "\n当前配置的 NovelAI 画风预设名称：" + json.dumps(names, ensure_ascii=False)
+                + "。当用户要求用某一预设绘图时，将对应的完整名称传给 nai5_draw_image 的 preset_name。"
+                "例如「按某某风格来一张」也可以点名预设。多个名称都可能匹配时先询问。"
+            )
+
     @filter.llm_tool(name="nai5_draw_image")
-    async def natural_draw(self, event: AstrMessageEvent, description: str):
+    async def natural_draw(self, event: AstrMessageEvent, description: str, preset_name: str = ""):
         """当前用户明确请你画图时，使用 NovelAI 生成并发送一张插画。每条消息只调用一次。
 
         Args:
-            description(string): 完整画面描述。若用户点名某个预设，在开头写【画风：预设名】，其余情况直接写画面。保留角色、动作、构图和文字。
+            description(string): 完整画面描述，保留角色、动作、构图、文字和用户临时描述的视觉风格。
+            preset_name(string): 用户点名的预设名称。未指定时填空字符串；明确要求跳过预设时填「无」。
         """
         if event.get_extra("nai5_draw_handled"):
             return "这条消息的绘图请求已经处理。"
         event.set_extra("nai5_draw_handled", True)
-        result = await self.handle(event, "draw", description=description.strip())
+        result = await self.handle(event, "draw", description=description.strip(), preset_name=preset_name)
         await event.send(result)
         return "处理结果已发送到当前聊天。"
 
@@ -188,7 +206,7 @@ class NovelAIPlugin(Star):
             "也可以在对话中说「帮我画一张雨后的街道」，需要启用绘图工具。\n"
             "/nai 雨后的街道 — 用描述绘图\n"
             "/nai预览 描述 → /nai确认 — 看词后出图\n"
-            "/nai画风 — 列出可用预设；/nai预览 【画风：透明水彩】雨后街道\n"
+            "/nai画风 — 列出可用预设；/nai预览 【画风：预设名称】雨后街道\n"
             "/nai图生图 水彩风格的街道 — 随指令附一张图，或回复原图\n"
             "/nai原词 watercolor, rainy street — 直接提交已有提示词\n"
             "/nai重画 — 为上次文生图换种子；/nai重画 42 — 指定种子"
