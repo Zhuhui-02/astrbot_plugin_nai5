@@ -13,10 +13,11 @@ from astrbot.api.star import Context, Star, register
 
 from .novelai import GenerationError, MODELS, SIZES, generation_service, generate, payload
 from .source_image import read_source
-from .prompting import PromptError, direct_draw_request, instructions, parse_prompt, select_style, style_presets
+from .prompting import (OUTPUT_FORMAT, PromptError, PromptFormatError, direct_draw_request,
+                        instructions, parse_prompt, select_style, style_presets)
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.2")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.5.3")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -24,6 +25,12 @@ class NovelAIPlugin(Star):
         self.previews = OrderedDict()
         self.last_text_draw = OrderedDict()
         self.lock = asyncio.Lock()
+
+    async def request_prompt_text(self, provider, system, prompt):
+        answer = await asyncio.wait_for(self.context.llm_generate(
+            chat_provider_id=provider, system_prompt=system, prompt=prompt
+        ), timeout=120)
+        return answer.completion_text
 
     async def compile_prompt(self, event, description, preset_name="", *, from_chat=False):
         context_hint = ""
@@ -46,13 +53,28 @@ class NovelAIPlugin(Star):
         prompt = json.dumps(fields, ensure_ascii=False) if len(fields) > 1 else scene
         try:
             provider = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
-            answer = await asyncio.wait_for(self.context.llm_generate(
-                chat_provider_id=provider, system_prompt=system, prompt=prompt
-            ), timeout=120)
+            raw = await self.request_prompt_text(provider, system, prompt)
+            try:
+                plan = parse_prompt(raw)
+            except PromptFormatError as exc:
+                logger.info("NAI5 编词结果需要整理格式：%s", exc)
+                repair = (
+                    OUTPUT_FORMAT + " 将输入中的 draft 整理为上述结构，保留已有主串、全部角色、"
+                    "左右关系、文字和负面词。只依据草稿整理；如果草稿没有可整理的绘图提示词，返回 null。"
+                )
+                draft = json.dumps({"draft": raw, "error": str(exc)}, ensure_ascii=False)
+                fixed = await self.request_prompt_text(provider, repair, draft)
+                if isinstance(fixed, str) and fixed.strip() == "null":
+                    raise PromptError("编词模型未给出可用的绘图提示词。请用 /nai预览 检查当前聊天模型。")
+                try:
+                    plan = parse_prompt(fixed)
+                except PromptError as final:
+                    raise PromptError(f"编词模型已尝试整理一次，仍无法读取：{final}") from None
+        except PromptError:
+            raise
         except Exception as exc:
             logger.warning("NAI5 聊天模型调用失败 (%s)", type(exc).__name__)
             raise PromptError("无法取得提示词，请检查当前会话的聊天模型配置及连接。") from exc
-        plan = parse_prompt(answer.completion_text)
         plan["style_name"] = name
         return plan
 
