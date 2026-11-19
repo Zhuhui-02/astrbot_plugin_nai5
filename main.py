@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 from copy import deepcopy
@@ -12,10 +13,10 @@ from astrbot.api.star import Context, Star, register
 
 from .novelai import GenerationError, MODELS, SIZES, generate, payload
 from .source_image import read_source
-from .prompting import PromptError, instructions, parse_prompt
+from .prompting import PromptError, instructions, parse_prompt, select_style, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.3.0")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.4.0")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -25,16 +26,24 @@ class NovelAIPlugin(Star):
         self.lock = asyncio.Lock()
 
     async def compile_prompt(self, event, description):
-        system = instructions(description)
+        scene, name, brief = select_style(self.config, description)
+        system = instructions(scene, use_style=bool(name))
+        prompt = scene
+        if name:
+            prompt = json.dumps(
+                {"scene": scene, "style_name": name, "style_brief": brief}, ensure_ascii=False
+            )
         try:
             provider = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
             answer = await asyncio.wait_for(self.context.llm_generate(
-                chat_provider_id=provider, system_prompt=system, prompt=description
+                chat_provider_id=provider, system_prompt=system, prompt=prompt
             ), timeout=120)
         except Exception as exc:
             logger.warning("NAI5 聊天模型调用失败 (%s)", type(exc).__name__)
             raise PromptError("无法取得提示词，请检查当前会话的聊天模型配置及连接。") from exc
-        return parse_prompt(answer.completion_text)
+        plan = parse_prompt(answer.completion_text)
+        plan["style_name"] = name
+        return plan
 
     @staticmethod
     def remember(cache, key, value):
@@ -46,6 +55,8 @@ class NovelAIPlugin(Star):
     @staticmethod
     def preview_text(plan):
         fields = ["主提示词\n" + plan["base"]]
+        if plan.get("style_name"):
+            fields.insert(0, "画风：" + plan["style_name"])
         for i, char in enumerate(plan["characters"], 1):
             fields.append(f"角色 {i} ({char['x']}, {char['y']})\n{char['prompt']}")
         if plan["negative"]:
@@ -131,7 +142,7 @@ class NovelAIPlugin(Star):
         """当前用户明确请你画图时，使用 NovelAI 生成并发送一张插画。每条消息只调用一次。
 
         Args:
-            description(string): 需要绘制的完整画面描述，保留用户指定的角色、动作、构图和文字。
+            description(string): 完整画面描述。若用户点名某个预设，在开头写【画风：预设名】，其余情况直接写画面。保留角色、动作、构图和文字。
         """
         if event.get_extra("nai5_draw_handled"):
             return "这条消息的绘图请求已经处理。"
@@ -177,7 +188,21 @@ class NovelAIPlugin(Star):
             "也可以在对话中说「帮我画一张雨后的街道」，需要启用绘图工具。\n"
             "/nai 雨后的街道 — 用描述绘图\n"
             "/nai预览 描述 → /nai确认 — 看词后出图\n"
+            "/nai画风 — 列出可用预设；/nai预览 【画风：透明水彩】雨后街道\n"
             "/nai图生图 水彩风格的街道 — 随指令附一张图，或回复原图\n"
             "/nai原词 watercolor, rainy street — 直接提交已有提示词\n"
             "/nai重画 — 为上次文生图换种子；/nai重画 42 — 指定种子"
         )
+
+    @filter.command("nai画风")
+    async def list_styles(self, event: AstrMessageEvent):
+        """查看可用的画风预设和默认画风。"""
+        try:
+            presets = style_presets(self.config)
+        except PromptError as exc:
+            yield event.plain_result(str(exc))
+            return
+        default = self.config.get("default_style", "").strip() or "无"
+        lines = [f"默认画风：{default}", "可用预设：" + ("、".join(presets) or "暂无"),
+                 "本次指定：/nai预览 【画风：名称】画面描述；跳过预设用【画风：无】。"]
+        yield event.plain_result("\n".join(lines))

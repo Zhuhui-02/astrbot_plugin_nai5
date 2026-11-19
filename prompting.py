@@ -10,6 +10,35 @@ class PromptError(ValueError):
     pass
 
 
+def style_presets(config):
+    presets = {}
+    for entry in config.get("style_presets", []):
+        parts = re.split(r"[|｜]", entry, maxsplit=1) if isinstance(entry, str) else []
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            raise PromptError("画风预设格式有误，请在配置中按「名称｜画风说明」填写每一项。")
+        name, brief = (part.strip() for part in parts)
+        if name == "无" or name in presets or "】" in name:
+            raise PromptError(f"请检查画风名称「{name}」：名称须唯一，且不能用「无」或含有 】。")
+        presets[name] = brief
+    return presets
+
+
+def select_style(config, description):
+    name = config.get("default_style", "").strip()
+    override = re.match(r"^【画风[:：]([^】]+)】\s*", description)
+    if override:
+        name = override[1].strip()
+        description = description[override.end():]
+    if not description.strip():
+        raise PromptError("请在画风名称后填写要画的内容。")
+    if not name or name == "无":
+        return description, "", ""
+    presets = style_presets(config)
+    if name not in presets:
+        raise PromptError(f"找不到画风「{name}」，请用 /nai画风 查看可用名称。")
+    return description, name, presets[name]
+
+
 @lru_cache(maxsize=32)
 def section(skill, filename, heading):
     source = (SKILLS / skill / "references" / filename).read_text(encoding="utf-8")
@@ -21,7 +50,7 @@ def section(skill, filename, heading):
     return "\n".join(lines[start:end])
 
 
-def instructions(description):
+def instructions(description, *, use_style=False):
     excerpts = [
         section("nai5-illustration-composition", "composition.md", "## 镜头、空间与主次"),
         section("nai5-writing", "conventions.md", "## 字段职责：先选画面类型"),
@@ -33,6 +62,14 @@ def instructions(description):
         excerpts.append(section("nai5-comic-writing", "comics.md", "### 字段模板与先后顺序"))
     if re.search(r"服装|穿搭|衣装|服饰|outfit|costume", description, re.I):
         excerpts.append(section("nai5-costume-writing", "costume.md", "### 将服装放入完整画面"))
+    if use_style:
+        excerpts.append(section("nai5-writing", "illustration.md", "### 样式块：画师与技法串的组织"))
+        excerpts.append(
+            "本次输入是 JSON，scene 是用户画面，style_brief 是选定的画风资料。"
+            "按画风选择与场景呼应的线条、上色、光影或媒材表达，整合进最终英文提示词。"
+            "保留用户指定的主体、动作、色彩与文字，发生冲突时以用户的明确要求为准。"
+            "资料中明确指定的固定标签串应保留原文、权重及顺序。画风名仅用于标识。"
+        )
     return "\n\n".join(excerpts) + """
 根据以上方法把用户的画面描述编译成一张 NovelAI V5 插画。只返回一个 JSON 对象。
 格式 {"base":"主提示词","negative":"","characters":[{"prompt":"角色栏","x":0.5,"y":0.5}]}。
