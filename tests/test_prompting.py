@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from prompting import PromptError, parse_prompt
+from prompting import PromptError, parse_prompt, parse_review
 
 
 class ParsePromptTests(unittest.TestCase):
@@ -29,3 +29,12 @@ class ParsePromptTests(unittest.TestCase):
             raw = json.dumps({"base": "scene", "characters": [{"prompt": "fox", "x": value, "y": 0.5}]})
             with self.subTest(value=value), self.assertRaisesRegex(PromptError, "第 1 个角色的 x"):
                 parse_prompt(raw)
+
+class ParseReviewTests(unittest.TestCase):
+    def test_only_consistent_verdicts_are_accepted(self):
+        self.assertEqual(parse_review('```json\n{"matches":true,"issues":[]}\n```'), [])
+        self.assertEqual(parse_review('{"matches":false,"issues":["missing fox"]}'), ["missing fox"])
+        for raw in (None, 'ok', '{}', '{"matches":1,"issues":[]}', '{"matches":"false","issues":[]}',
+                    '{"matches":false,"issues":[]}', '{"matches":true,"issues":["different subject"]}'):
+            with self.subTest(raw=raw), self.assertRaises(PromptError):
+                parse_review(raw)

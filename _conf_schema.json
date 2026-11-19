@@ -1,4 +1,10 @@
 {
+  "review_prompt": {
+    "description": "AI 复核提示词",
+    "type": "bool",
+    "default": true,
+    "hint": "每份新编提示词使用编词模型额外核对一次。发现偏差后修订并再复核一次。"
+  },
   "prompt_provider_id": {
     "type": "string",
     "description": "独立编词模型 Provider ID",

@@ -16,7 +16,7 @@ from .prompt_agent import PromptAgent
 from .prompting import PromptError, direct_draw_request, style_presets
 
 
-@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.6.1")
+@register("astrbot_plugin_nai5", "Zhuhui-02", "使用 nai5-prompting 和 NovelAI V5 生图", "0.7.0")
 class NovelAIPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)

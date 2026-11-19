@@ -171,3 +171,22 @@ def parse_prompt(raw):
                 raise PromptFormatError(f"第 {i} 个角色的 {axis} 坐标应为 0 至 1 的数字。")
             char[axis] = value
     return {"base": base, "negative": negative, "characters": characters}
+
+
+def parse_review(raw):
+    """Only an explicit, consistent review verdict can authorize a draw."""
+    if isinstance(raw, str):
+        text = raw.strip()
+        fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.I | re.S)
+        try:
+            verdict = json.loads(fence[1] if fence else text)
+        except (ValueError, RecursionError):
+            verdict = None
+        if isinstance(verdict, dict):
+            matches = verdict.get("matches")
+            issues = verdict.get("issues")
+            if (type(matches) is bool and isinstance(issues, list)
+                    and all(isinstance(item, str) and item.strip() for item in issues)
+                    and matches == (len(issues) == 0)):
+                return issues
+    raise PromptError("AI 复核未返回明确有效的结论，本次未提交生图。")
